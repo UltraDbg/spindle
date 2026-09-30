@@ -28,13 +28,18 @@ where
     o: bool,
 }
 
+#[derive(PartialEq, Debug)]
 ///! Any operation on the graph generates an "error"
 pub enum GraphError {
     Unknown = -1,
     Ok = 0,
-    VertexAlreadyExists = 1,
-    EdgeAlreadyExists = 2,
-    InvalidEdgeVertices = 3,
+
+    VertexAlreadyExists,
+    InvalidVertex,
+
+    EdgeAlreadyExists,
+    InvalidEdge,
+    InvalidEdgeVertices,
 }
 
 impl<V, E> Graph<V, E>
@@ -83,11 +88,23 @@ where
             .collect()
     }
 
-    pub fn degree(&self, v: V) -> usize {
-        self.neighbors(&v).len()
+    pub fn neighbors_iter<'a>(&'a self, v: &'a V) -> impl Iterator<Item = &'a V> {
+        self.e.iter().filter_map(move |e| {
+            if e.source() == v {
+                Some(e.target())
+            } else if !self.o && e.target() == v {
+                Some(e.source())
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn isolated(&self, v: V) -> bool {
+    pub fn degree(&self, v: &V) -> usize {
+        self.neighbors(v).len()
+    }
+
+    pub fn isolated(&self, v: &V) -> bool {
         self.degree(v) == 0
     }
 
@@ -134,6 +151,47 @@ where
             }
         }
     }
+
+    fn remove_edge(&mut self, e: &E) -> GraphError {
+        if let Some(idx) = self.e.iter().position(|edge| {
+            edge.source() == e.source() && edge.target() == e.target()
+                || (!self.o && edge.source() == e.target() && edge.target() == e.source())
+        }) {
+            self.e.remove(idx);
+            GraphError::Ok
+        } else {
+            GraphError::InvalidEdge
+        }
+    }
+
+    fn remove_edges_incident_to(&mut self, v: &V) -> GraphError {
+        if !self.vertex_exists(&v) {
+            return GraphError::InvalidVertex;
+        } else {
+            self.e
+                .retain(|edge| edge.source() != v && edge.target() != v);
+            return GraphError::Ok;
+        }
+    }
+
+    fn remove_vertex(&mut self, v: V) -> GraphError {
+        if !self.vertex_exists(&v) {
+            return GraphError::InvalidVertex;
+        } else {
+            if self.degree(&v) == 0 {
+                if let Some(idx) = self.v.iter().position(|vertex| vertex == &v) {
+                    self.v.remove(idx);
+                }
+            } else {
+                self.remove_edges_incident_to(&v);
+                if let Some(idx) = self.v.iter().position(|vertex| vertex == &v) {
+                    self.v.remove(idx);
+                }
+            }
+
+            return GraphError::Ok;
+        }
+    }
 }
 
 ///! Allow comparaisons between graphs
@@ -148,10 +206,10 @@ where
 }
 
 ///! Additional Eq properties (car ssi)
-impl<V, E> std::cmp::Eq for Graph<V, E>
+impl<V, E> Eq for Graph<V, E>
 where
-    V: std::cmp::PartialEq,
-    E: std::cmp::PartialEq + Edge<V>,
+    V: Eq,
+    E: Eq + Edge<V>,
 {
 }
 
@@ -185,6 +243,12 @@ mod tests {
         assert!(graph.edge_exists(&(1, 2)));
         assert!(!graph.edge_exists(&(2, 1)));
 
+        graph.remove_vertex(1);
+        assert!(!graph.vertex_exists(&1));
+        assert!(!graph.edge_exists(&(1, 2)));
+
+        assert_eq!(graph.remove_edge(&(1,2)), GraphError::InvalidEdge);
+
         graph = Graph::<u32>::new(false);
 
         graph.add_vertex(1);
@@ -195,5 +259,13 @@ mod tests {
         graph.add_edge((1, 2));
         assert!(graph.edge_exists(&(1, 2)));
         assert!(graph.edge_exists(&(2, 1))); // Non oriented, so this should pass
+
+        graph.remove_vertex(1);
+        assert!(!graph.vertex_exists(&1));
+        assert!(!graph.edge_exists(&(1, 2)));
+        assert!(!graph.edge_exists(&(2, 1)));
+
+        assert_eq!(graph.remove_edge(&(1,2)), GraphError::InvalidEdge);
+
     }
 }
